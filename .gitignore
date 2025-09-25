@@ -1,0 +1,5 @@
+# .gitignore
+venv/
+.env
+strava_activities.ics
+.DS_Store
