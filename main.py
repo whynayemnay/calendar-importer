@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import requests
 from dotenv import load_dotenv
 from ics import Calendar, Event
-from flask import Flask, Response
+from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 load_dotenv()
@@ -15,10 +15,43 @@ load_dotenv()
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 # ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+STRAVA_VERIFY_TOKEN = os.getenv("STRAVA_VERIFY_TOKEN", "strava_secret_token")
+SUBSCRIPTION_ID = os.getenv("SUBSCRIPTION_ID")
 TOKEN_FILE = "token.json"
 PER_PAGE = 10
 
-# TODO: implement refresh token logic
+
+@app.route("/strava/webhook", methods=["GET", "POST"])
+def strava_webhook():
+    if request.method == "GET":
+        # Verification challenge
+        verify_token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+
+        if verify_token == STRAVA_VERIFY_TOKEN:
+            return jsonify({"hub.challenge": challenge})
+        else:
+            return "invalid verify token", 403
+
+    if request.method == "POST":
+        data = request.json
+        if not data:
+            return jsonify({"error", "no JSON payload"}), 400
+
+        # Basic validation
+        if SUBSCRIPTION_ID and str(data.get("subscription_id")) != SUBSCRIPTION_ID:
+            return "invalid subscription_id", 403
+
+        # (Optional) Only accept events from your athlete ID
+        # if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
+        #     return "Invalid owner", 403
+
+        print("received webhook event:", data)
+
+        # TODO: async? write some logic that will process the recieved payload and update the calendar
+        # get a domain instead of using cloudflare quick tunnel
+        return "", 200
+    return "", 405
 
 
 def load_tokens():
