@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 import json
 from datetime import datetime, timedelta
@@ -18,7 +19,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 STRAVA_VERIFY_TOKEN = os.getenv("STRAVA_VERIFY_TOKEN", "strava_secret_token")
 SUBSCRIPTION_ID = os.getenv("SUBSCRIPTION_ID")
 TOKEN_FILE = "token.json"
-PER_PAGE = 10
+PER_PAGE = 20
 
 
 @app.route("/strava/webhook", methods=["GET", "POST"])
@@ -45,11 +46,23 @@ def strava_webhook():
         # (Optional) Only accept events from your athlete ID
         # if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
         #     return "Invalid owner", 403
+        object_id = data.get("object_id")
 
-        print("received webhook event:", data)
+        # Kick off background work (don’t block response)
+        if (
+            data.get("object_type") == "activity"
+            and data.get("aspect_type") == "create"
+        ):
+            threading.Thread(
+                target=lambda: (
+                    print(f"processing activity {object_id}"),
+                    add_activity_to_calendar(fetch_strava_activity(object_id)),
+                    print(f"processed {object_id}"),
+                )
+            ).start()
+            print("received webhook event:", data)
 
-        # TODO: async? write some logic that will process the recieved payload and update the calendar
-        # get a domain instead of using cloudflare quick tunnel
+        # TODO:        # get a domain instead of using cloudflare quick tunnel
         return "", 200
     return "", 405
 
@@ -98,46 +111,86 @@ def fetch_strava_activities():
     return response.json()
 
 
+def fetch_strava_activity(activity_id: int):
+    access_token = get_valid_access_token()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    url = f"https://www.strava.com/api/v3/activities/{activity_id}"
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
 # ===== BUILD CALENDAR =====
-def build_calendar(activities):
+def build_calendar_file(activities, calendar_file="calendar.ics"):
     calendar = Calendar()
+
     for activity in activities:
         event = Event()
         event.uid = str(activity["id"])
         event.name = activity["name"]
-        # Start and end times
+
         start_time = datetime.fromisoformat(
             activity["start_date"].replace("Z", "+00:00")
         )
         duration = timedelta(seconds=activity["elapsed_time"])
-        end_time = start_time + duration
-
         event.begin = start_time
-        event.end = end_time
-        # Optional description
+        event.end = start_time + duration
+
         event.description = (
             f"Type: {activity.get('type')} | Sport: {activity.get('sport_type')}"
         )
-        # # Optional location
-        # loc_parts = filter(
-        #     None,
-        #     [
-        #         activity.get("location_city"),
-        #         activity.get("location_state"),
-        #         activity.get("location_country"),
-        #     ],
-        # )
-        # event.location = ", ".join(loc_parts) if loc_parts else ""
-        #
+
+        # Avoid duplicates (mostly for safety)
+        if not any(ev.uid == event.uid for ev in calendar.events):
+            calendar.events.add(event)
+
+    with open(calendar_file, "w") as f:
+        f.write(calendar.serialize())
+
+
+def add_activity_to_calendar(activity, calendar_file="calendar.ics"):
+    if os.path.exists(calendar_file):
+        with open(calendar_file, "r") as f:
+            calendar = Calendar(f.read())
+    else:
+        calendar = Calendar()
+
+    event = Event()
+    event.uid = str(activity["id"])
+    event.name = activity["name"]
+
+    start_time = datetime.fromisoformat(activity["start_date"].replace("Z", "+00:00"))
+    duration = timedelta(seconds=activity["elapsed_time"])
+    end_time = start_time + duration
+
+    event.begin = start_time
+    event.end = end_time
+    event.description = (
+        f"Type: {activity.get('type')} | Sport: {activity.get('sport_type')}"
+    )
+
+    # Avoid duplicates (in case webhook fires twice for same activity)
+    if not any(ev.uid == event.uid for ev in calendar.events):
         calendar.events.add(event)
-    return calendar
+
+    # Save back to file
+    with open(calendar_file, "w") as f:
+        f.write(calendar.serialize())
 
 
 @app.route("/calendar.ics")
 def calendar_feed():
+    if not os.path.exists("calendar.ics"):
+        return "Calendar not built yet", 404
+    with open("calendar.ics", "r") as f:
+        return Response(f.read(), mimetype="text/calendar")
+
+
+@app.route("/rebuild-calendar", methods=["POST"])
+def rebuild_calendar():
     activities = fetch_strava_activities()
-    calendar = build_calendar(activities)
-    return Response(calendar.serialize(), mimetype="text/calendar")
+    build_calendar_file(activities)
+    return "Calendar rebuilt", 200
 
 
 if __name__ == "__main__":

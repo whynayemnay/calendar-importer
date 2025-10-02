@@ -4,3 +4,4 @@ venv/
 strava_activities.ics
 token.json
 .DS_Store
+calendar.ics
