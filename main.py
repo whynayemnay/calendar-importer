@@ -77,6 +77,43 @@ def save_tokens(tokens):
         json.dump(tokens, f, indent=2)
 
 
+def refresh_strava_webhook(callback_url: str):
+    ### Delete current sub, should be only 1 but in case more
+    resp = requests.get(
+        "https://www.strava.com/api/v3/push_subscriptions",
+        params={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+    )
+    resp.raise_for_status()
+    subs = resp.json()
+
+    for sub in subs:
+        sub_id = sub["id"]
+        del_resp = requests.delete(
+            f"https://www.strava.com/api/v3/push_subscriptions/{sub_id}",
+            params={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+        )
+        if del_resp.status_code == 204:
+            print(f"[x] Deleted subscritption {sub_id}")
+        else:
+            print(f"!!! Failed to delete {sub_id}: {del_resp.text}")
+
+    create_resp = requests.post(
+        "https://www.strava.com/api/v3/push_subscriptions",
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "callback_url": callback_url,
+            "verify_token": STRAVA_VERIFY_TOKEN,
+        },
+    )
+    if create_resp.status_code == 201:
+        sub_info = create_resp.json()
+        print(f"[x] Created new subscription: {sub_info}")
+        return sub_info
+    else:
+        raise Exception(f"Failed to create subscription: {create_resp.text}")
+
+
 def get_valid_access_token():
     tokens = load_tokens()
     now = int(time.time())
@@ -191,6 +228,20 @@ def rebuild_calendar():
     activities = fetch_strava_activities()
     build_calendar_file(activities)
     return "Calendar rebuilt", 200
+
+
+@app.route("/refresh-webhook", methods=["POST"])
+def refresh_webhook_route():
+    data = request.json
+    if not data or "callback_url" not in data:
+        return jsonify({"error": "Missing 'callback_url' in JSON body"}), 400
+
+    callback_url = data["callback_url"].rstrip("/") + "/strava/webhook"
+    try:
+        new_sub = refresh_strava_webhook(callback_url)
+        return jsonify({"message": "Subscription refreshed", "subscription": new_sub})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
