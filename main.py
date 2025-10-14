@@ -3,6 +3,8 @@ import threading
 import time
 import json
 from datetime import datetime, timedelta
+import pytz
+
 
 import requests
 from dotenv import load_dotenv
@@ -20,6 +22,8 @@ STRAVA_VERIFY_TOKEN = os.getenv("STRAVA_VERIFY_TOKEN", "strava_secret_token")
 SUBSCRIPTION_ID = os.getenv("SUBSCRIPTION_ID")
 TOKEN_FILE = "token.json"
 PER_PAGE = 20
+
+local_tz = pytz.timezone("Europe/Berlin")
 
 
 def load_tokens():
@@ -284,6 +288,9 @@ def sleep_data():
 
         start_dt = datetime.strptime(start_str, "%d.%m.%Y, %H:%M")
         end_dt = datetime.strptime(end_str, "%d.%m.%Y, %H:%M")
+
+        start_dt = local_tz.localize(start_dt)
+        end_dt = local_tz.localize(end_dt)
 
         add_sleep_to_calendar(start_dt, end_dt, description)
         return "Sleep event added", 200
