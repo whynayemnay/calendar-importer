@@ -244,5 +244,13 @@ def refresh_webhook_route():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/sleep", methods=["POST"])
+def receive_sleep():
+    data = request.json
+    print("sleep data:", data)
+
+    return jsonify({"status": "ok", "received": data}), 200
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
