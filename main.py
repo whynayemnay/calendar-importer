@@ -271,7 +271,8 @@ def refresh_webhook_route():
 @app.route("/sleep", methods=["POST"])
 def sleep_data():
     data = request.json
-    if not data or "startdate" or "enddate" not in data:
+    required_keys = {"startdate", "enddate"}
+    if not data or not required_keys.issubset(data.keys()):
         return jsonify({"error": "missing 'startdate' or 'enddate' in JSON body"}), 400
 
     print("sleep data:", data)
