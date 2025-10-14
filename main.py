@@ -22,51 +22,6 @@ TOKEN_FILE = "token.json"
 PER_PAGE = 20
 
 
-@app.route("/strava/webhook", methods=["GET", "POST"])
-def strava_webhook():
-    if request.method == "GET":
-        # Verification challenge
-        verify_token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-
-        if verify_token == STRAVA_VERIFY_TOKEN:
-            return jsonify({"hub.challenge": challenge})
-        else:
-            return "invalid verify token", 403
-
-    if request.method == "POST":
-        data = request.json
-        if not data:
-            return jsonify({"error", "no JSON payload"}), 400
-
-        # Basic validation
-        if SUBSCRIPTION_ID and str(data.get("subscription_id")) != SUBSCRIPTION_ID:
-            return "invalid subscription_id", 403
-
-        # (Optional) Only accept events from your athlete ID
-        # if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
-        #     return "Invalid owner", 403
-        object_id = data.get("object_id")
-
-        # Kick off background work (don’t block response)
-        if (
-            data.get("object_type") == "activity"
-            and data.get("aspect_type") == "create"
-        ):
-            threading.Thread(
-                target=lambda: (
-                    print(f"processing activity {object_id}"),
-                    add_activity_to_calendar(fetch_strava_activity(object_id)),
-                    print(f"processed {object_id}"),
-                )
-            ).start()
-            print("received webhook event:", data)
-
-        # TODO:        # get a domain instead of using cloudflare quick tunnel
-        return "", 200
-    return "", 405
-
-
 def load_tokens():
     with open(TOKEN_FILE, "r") as f:
         return json.load(f)
@@ -185,6 +140,30 @@ def build_calendar_file(activities, calendar_file="calendar.ics"):
         f.write(calendar.serialize())
 
 
+def add_sleep_to_calendar(
+    start_dt, end_dt, description, calendar_file="sleep_calendar.ics"
+):
+    if os.path.exists(calendar_file):
+        with open(calendar_file, "r") as f:
+            calendar = Calendar(f.read())
+    else:
+        calendar = Calendar()
+
+    event = Event()
+    event.uid = f"sleep-{start_dt.isoformat()}"
+    event.name = "Sleep"
+    event.begin = start_dt
+    event.end = end_dt
+    event.description = description
+
+    # Avoid duplicates
+    if not any(ev.uid == event.uid for ev in calendar.events):
+        calendar.events.add(event)
+
+    with open(calendar_file, "w") as f:
+        f.write(calendar.serialize())
+
+
 def add_activity_to_calendar(activity, calendar_file="calendar.ics"):
     if os.path.exists(calendar_file):
         with open(calendar_file, "r") as f:
@@ -213,6 +192,51 @@ def add_activity_to_calendar(activity, calendar_file="calendar.ics"):
     # Save back to file
     with open(calendar_file, "w") as f:
         f.write(calendar.serialize())
+
+
+@app.route("/strava/webhook", methods=["GET", "POST"])
+def strava_webhook():
+    if request.method == "GET":
+        # Verification challenge
+        verify_token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+
+        if verify_token == STRAVA_VERIFY_TOKEN:
+            return jsonify({"hub.challenge": challenge})
+        else:
+            return "invalid verify token", 403
+
+    if request.method == "POST":
+        data = request.json
+        if not data:
+            return jsonify({"error", "no JSON payload"}), 400
+
+        # Basic validation
+        if SUBSCRIPTION_ID and str(data.get("subscription_id")) != SUBSCRIPTION_ID:
+            return "invalid subscription_id", 403
+
+        # (Optional) Only accept events from your athlete ID
+        # if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
+        #     return "Invalid owner", 403
+        object_id = data.get("object_id")
+
+        # Kick off background work (don’t block response)
+        if (
+            data.get("object_type") == "activity"
+            and data.get("aspect_type") == "create"
+        ):
+            threading.Thread(
+                target=lambda: (
+                    print(f"processing activity {object_id}"),
+                    add_activity_to_calendar(fetch_strava_activity(object_id)),
+                    print(f"processed {object_id}"),
+                )
+            ).start()
+            print("received webhook event:", data)
+
+        # TODO:        # get a domain instead of using cloudflare quick tunnel
+        return "", 200
+    return "", 405
 
 
 @app.route("/calendar.ics")
@@ -245,11 +269,27 @@ def refresh_webhook_route():
 
 
 @app.route("/sleep", methods=["POST"])
-def receive_sleep():
+def sleep_data():
     data = request.json
+    if not data or "startdate" or "enddate" not in data:
+        return jsonify({"error": "missing 'startdate' or 'enddate' in JSON body"}), 400
+
     print("sleep data:", data)
 
-    return jsonify({"status": "ok", "received": data}), 200
+    try:
+        start_str = data["startdate"]
+        end_str = data["enddate"]
+        description = data.get("description", "Sleep")
+
+        start_dt = datetime.strptime(start_str, "%d.%m.%Y, %H:%M")
+        end_dt = datetime.strptime(end_str, "%d.%m.%Y, %H:%M")
+
+        add_sleep_to_calendar(start_dt, end_dt, description)
+        return "Sleep event added", 200
+
+    except Exception as e:
+        print("Error processing sleep data:", e)
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
