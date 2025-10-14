@@ -293,5 +293,13 @@ def sleep_data():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/sleep_calendar.ics")
+def sleep_calendar_feed():
+    if not os.path.exists("sleep_calendar.ics"):
+        return "Sleep calendar not built yet", 404
+    with open("sleep_calendar.ics", "r") as f:
+        return Response(f.read(), mimetype="text/calendar")
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
