@@ -117,7 +117,7 @@ def fetch_strava_activity(activity_id: int):
 
 
 # ===== BUILD CALENDAR =====
-def build_calendar_file(activities, calendar_file="calendar.ics"):
+def build_calendar_file(activities, calendar_file="workout_calendar.ics"):
     calendar = Calendar()
 
     for activity in activities:
@@ -168,7 +168,7 @@ def add_sleep_to_calendar(
         f.write(calendar.serialize())
 
 
-def add_activity_to_calendar(activity, calendar_file="calendar.ics"):
+def add_activity_to_calendar(activity, calendar_file="workout_calendar.ics"):
     if os.path.exists(calendar_file):
         with open(calendar_file, "r") as f:
             calendar = Calendar(f.read())
@@ -220,8 +220,8 @@ def strava_webhook():
             return "invalid subscription_id", 403
 
         # (Optional) Only accept events from your athlete ID
-        # if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
-        #     return "Invalid owner", 403
+        if str(data.get("owner_id")) != os.getenv("STRAVA_ATHLETE_ID"):
+            return "Invalid owner", 403
         object_id = data.get("object_id")
 
         # Kick off background work (don’t block response)
@@ -243,11 +243,11 @@ def strava_webhook():
     return "", 405
 
 
-@app.route("/calendar.ics")
+@app.route("/workout_calendar.ics")
 def calendar_feed():
-    if not os.path.exists("calendar.ics"):
+    if not os.path.exists("workout_calendar.ics"):
         return "Calendar not built yet", 404
-    with open("calendar.ics", "r") as f:
+    with open("workout_calendar.ics", "r") as f:
         return Response(f.read(), mimetype="text/calendar")
 
 
